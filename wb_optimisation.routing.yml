@@ -1,0 +1,7 @@
+wb_optimisation.delete_batch_form:
+  path: "/admin/config/system/batch_form"
+  defaults:
+    _title: "Language lighter settings"
+    _controller: '\Drupal\wb_optimisation\Controller\WbOptimisationController::getDeletationForm'
+  requirements:
+    _permission: "administer site configuration"

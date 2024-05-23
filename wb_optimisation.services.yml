@@ -1,0 +1,4 @@
+services:
+  wb_optimisation.handler:
+    class: Drupal\wb_optimisation\Service\OptimisationHandler
+    arguments: ["@entity_type.manager",, "@entity_field.manager"]

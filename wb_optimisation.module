@@ -1,0 +1,24 @@
+<?php
+
+/**
+ * @file
+ * Contains wb_optimisation.module.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+
+/**
+ * Implements hook_help().
+ */
+function wb_optimisation_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the wb_optimisation module.
+    case 'help.page.wb_optimisation':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Module for the optimisation of wb-horizon') . '</p>';
+      return $output;
+
+    default:
+  }
+}

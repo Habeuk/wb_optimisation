@@ -1,0 +1,8 @@
+name: "WB Optimisation"
+type: module
+description: "Module for the optimisation of wb-horizon"
+core_version_requirement: 9.x
+package: "Custom"
+dependencies:
+  - lesroidelareno
+  - creation_site_virtuel
