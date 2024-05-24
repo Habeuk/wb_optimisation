@@ -165,7 +165,7 @@ class OptimisationHandler {
     }
     $progress = $context["result"][$entity_id] > $total ? $total : $context["result"][$entity_id];
 
-    $context["message"] =  t('@domain \n Suppression des @entity_type_id en cours', ["@domain" => $domain_id, "@entity_type_id" => $entity_id]);
+    $context["message"] =  t('@domain : Suppression des @entity_type_id en cours', ["@domain" => $domain_id, "@entity_type_id" => $entity_id]);
     $optimisation_handler = \Drupal::service("wb_optimisation.handler");
     $optimisation_handler->deleteMultipleByDomain($entity_id, $number, $domain_id);
   }
