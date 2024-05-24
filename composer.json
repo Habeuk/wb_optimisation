@@ -11,7 +11,7 @@
   ],
   "minimum-stability": "dev",
   "require": {
-    "habeuk/creation_site_virtuel": "^1.7.6 | dev-1x",
+    "stephane888/creation_site_virtuel": "^1.7.6 | dev-1x",
     "habeuk/lesroidelareno": "^2.0.14 | dev-wbh"
   }
 }
