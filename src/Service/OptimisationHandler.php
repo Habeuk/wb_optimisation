@@ -153,7 +153,7 @@ class OptimisationHandler {
   }
 
   public  static function _mon_module_ajouter_hello_batch_finished($success, $results, $operations) {
-    \Drupal::messenger()->addStatus("good");
+    \Drupal::messenger()->addStatus("opération terminée");
   }
 
 
