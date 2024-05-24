@@ -1,0 +1,17 @@
+{
+  "name": "habeuk/wb_optimisation",
+  "description": "Module pour gérer l'optimisation de wb-horizon",
+  "type": "drupal-custom-module",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "vystii",
+      "email": "ngahabanda@gmail.com"
+    }
+  ],
+  "minimum-stability": "dev",
+  "require": {
+    "habeuk/creation_site_virtuel": "^1.7.6 | dev-1x",
+    "habeuk/lesroidelareno": "^2.0.14 | dev-wbh"
+  }
+}
