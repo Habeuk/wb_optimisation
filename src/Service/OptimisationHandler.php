@@ -18,6 +18,11 @@ class OptimisationHandler {
   protected $field_domain;
 
   /**
+   * @var string
+   */
+  protected $query_tag = "unhandle_pass";
+
+  /**
    * @var array
    */
   protected $entity_to_delete =  [];
@@ -46,7 +51,8 @@ class OptimisationHandler {
   public function __construct(EntityTypeManagerInterface $entity_type_manager, EntityFieldManager $entity_field_manager) {
     $this->entityTypeManager = $entity_type_manager;
     $this->entityFieldManager = $entity_field_manager;
-    $this->field_domain = \Drupal\domain_source\DomainSourceElementManagerInterface::DOMAIN_SOURCE_FIELD;
+    $this->field_domain = \Drupal\domain_access\DomainAccessManagerInterface::DOMAIN_ACCESS_FIELD;
+    // $this->field_domain = \Drupal\domain_source\DomainSourceElementManagerInterface::DOMAIN_SOURCE_FIELD;
   }
 
   /**
@@ -85,6 +91,7 @@ class OptimisationHandler {
   protected function getMenu($domain_id, $count = false, $number = 10) {
     $entity_type_id = "menu";
     $query = $this->entityTypeManager->getStorage($entity_type_id)->getQuery();
+    $query->addTag($this->query_tag);
     $domain_ovh_entities = $this->entityTypeManager->getStorage('domain_ovh_entity')->loadByProperties([
       'domain_id_drupal' => $domain_id
     ]);
@@ -110,7 +117,7 @@ class OptimisationHandler {
   protected function getBlocks($domain_id, bool $count = false, $number = 10) {
     $entity_type_id = "block";
     $query = $this->entityTypeManager->getStorage($entity_type_id)->getQuery();
-
+    $query->addTag($this->query_tag);
     $orGroup = $query->orConditionGroup();
     $orGroup->condition('id', $domain_id, 'CONTAINS');;
     $orGroup->condition('theme', $domain_id);
@@ -128,7 +135,6 @@ class OptimisationHandler {
     $batch = (new BatchBuilder)
       ->setTitle('Suppression des entités liées au domaine..')
       ->setFinishCallback([self::class, '_mon_module_ajouter_hello_batch_finished']);
-
     foreach ($ovh_ids as $ovh_id) {
       /**
        * @var \Drupal\ovh_api_rest\Entity\DomainOvhEntity
@@ -148,7 +154,6 @@ class OptimisationHandler {
         }
       }
     }
-    // dd($batch);
     batch_set($batch->toArray());
   }
 
@@ -172,6 +177,7 @@ class OptimisationHandler {
 
 
   public function CountDomainSubEntities($domain_id) {
+
     $entities_type = $this->getStorageEntities();
     $result = [];
     $result["block"]  = $this->getBlocks($domain_id, true);
@@ -179,6 +185,7 @@ class OptimisationHandler {
     foreach ($entities_type as $entity_type_id => $entity_type) {
       $entityManager = $this->entityTypeManager->getStorage($entity_type_id);
       $query = $entityManager->getQuery();
+      $query->addTag($this->query_tag);
       $query->condition($this->field_domain, $domain_id);
       if ($entity_type[$this->field_public]) {
         $query->condition($this->field_public, false);
@@ -198,6 +205,8 @@ class OptimisationHandler {
 
   public function deleteMultipleByDomain($entity_id, $number, $domain_id) {
     $entityManager = $this->entityTypeManager->getStorage($entity_id);
+    $query = $entityManager->getQuery()->accessCheck(False);
+    $query->addTag($this->query_tag);
     $entitiesToDelete = [];
     switch ($entity_id) {
       case 'menu':
@@ -207,32 +216,27 @@ class OptimisationHandler {
         $entitiesToDelete = $this->getBlocks($domain_id, false, $number);
         break;
       case "domain_ovh_entity":
-        $query = $entityManager->getQuery()->accessCheck(False);
         $query->condition('domain_id_drupal', $domain_id);
         $entitiesToDelete = $query->execute();
         break;
       case "domain":
-        $query = $entityManager->getQuery()->accessCheck(False);
         $query->condition('id', $domain_id, '=');
         $entitiesToDelete = $query->range(0, $number)->execute();
         break;
       case "config_theme_entity":
-        $query = $entityManager->getQuery();
         $query->condition('hostname', $domain_id);
-        $ids = $query->range(0, $number)->execute();
+        $entitiesToDelete = $query->range(0, $number)->execute();
         break;
       default:
         $subEntities = $this->getStorageEntities();
-        $query = $entityManager->getQuery();
         $query->condition($this->field_domain, $domain_id);
         if ($subEntities[$entity_id][$this->field_public]) {
           $query->condition($this->field_public, false);
         }
         $entitiesToDelete = $query->range(0, $number)->execute();
-        # code...
         break;
     }
-    // dd($entitiesToDelete);
+
     $entityManager->delete($entityManager->loadMultiple(array_keys($entitiesToDelete)));
   }
 }
