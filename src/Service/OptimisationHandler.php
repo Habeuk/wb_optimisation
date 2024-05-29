@@ -65,17 +65,18 @@ class OptimisationHandler {
       $entities = array_filter($entities, function (EntityTypeInterface $entity) {
         if ($entity->getBaseTable()) {
           $entity_id = $entity->id();
-          return isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)[$this->field_domain]);
+          return isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)[$this->field_domain]) || isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)["domain_id"]);
         }
         return false;
       });
-
       foreach ($entities as $key => $entity) {
         if ($entity->getBaseTable()) {
           $entity_id = $entity->id();
-          if (isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)[$this->field_domain])) {
+          $hasDomainId = isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)["domain_id"]);
+          if (isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)[$this->field_domain]) || $hasDomainId) {
             $this->entity_to_delete[$key] = [
               $this->field_public => isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)[$this->field_public]),
+              "domain_id" => $hasDomainId,
               "type" => "storage"
             ];
           }
@@ -177,16 +178,16 @@ class OptimisationHandler {
 
 
   public function CountDomainSubEntities($domain_id) {
-
     $entities_type = $this->getStorageEntities();
     $result = [];
     $result["block"]  = $this->getBlocks($domain_id, true);
     $result["menu"]  = $this->getMenu($domain_id, true);
     foreach ($entities_type as $entity_type_id => $entity_type) {
       $entityManager = $this->entityTypeManager->getStorage($entity_type_id);
+      $field_domain = $entity_type["domain_id"] ? "domain_id" : $this->field_domain;
       $query = $entityManager->getQuery();
       $query->addTag($this->query_tag);
-      $query->condition($this->field_domain, $domain_id);
+      $query->condition($field_domain, $domain_id);
       if ($entity_type[$this->field_public]) {
         $query->condition($this->field_public, false);
       }
@@ -228,8 +229,9 @@ class OptimisationHandler {
         $entitiesToDelete = $query->range(0, $number)->execute();
         break;
       default:
+        $field_domain = isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)["domain_id"]) ? "domain_id" : $this->field_domain;
         $subEntities = $this->getStorageEntities();
-        $query->condition($this->field_domain, $domain_id);
+        $query->condition($field_domain, $domain_id);
         if ($subEntities[$entity_id][$this->field_public]) {
           $query->condition($this->field_public, false);
         }
