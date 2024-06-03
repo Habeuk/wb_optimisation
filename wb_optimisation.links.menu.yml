@@ -1,5 +1,5 @@
 wb_optimisation.delete_batch_form:
-  title: "Site web deletation"
+  title: "Website deletion"
   route_name: wb_optimisation.delete_batch_form
   description: "A description for the menu entry"
   parent: system.admin_config_system
