@@ -67,6 +67,12 @@ class FormDeleteBatch extends FormBase {
       "domain_id_drupal",
       "sub_domain"
     ]);
+    // on empeche la selection des domaines proteges.
+    $or = $query->orConditionGroup();
+    $or->condition('type_site', 'test');
+    $or->isNull('type_site');
+    $query->condition($or);
+    
     $request = $this->getRequest();
     $contain = $request->query->get("contain");
     /**

@@ -12,55 +12,51 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  * Class LanguageLighterForm.
  */
 class FilterForm extends FormBase {
-
+  
   /**
    *
    * @var \Drupal\domain\DomainNegotiatorInterface
    */
   protected $domainNegotiator;
-
+  
   /**
    *
    * @var EntityTypeManagerInterface
    */
   protected $entityTypeManager;
-
+  
   public static function create(ContainerInterface $container) {
-    return new static(
-      $container->get('domain.negotiator'),
-      $container->get('entity_type.manager'),
-    );
+    return new static($container->get('domain.negotiator'), $container->get('entity_type.manager'));
   }
-
-
-
+  
   /**
    *
    * @param DomainNegotiatorInterface $domainNegotiator
    * @param EntityTypeManagerInterface $entity_type_manager
    */
-  public function __construct(
-    DomainNegotiatorInterface $domainNegotiator,
-    EntityTypeManagerInterface $entity_type_manager,
-  ) {
+  public function __construct(DomainNegotiatorInterface $domainNegotiator, EntityTypeManagerInterface $entity_type_manager) {
     $this->entityTypeManager = $entity_type_manager;
     $this->domainNegotiator = $domainNegotiator;
   }
-
-
+  
   /**
+   *
    * {@inheritdoc}
    */
   public function getFormId() {
     return 'wb_optimisation_delete_form_filter';
   }
-
+  
   /**
+   *
    * {@inheritdoc}
    */
   public function buildForm(array $form, FormStateInterface $form_state) {
     $query = \Drupal::database()->select("domain_ovh_entity", "domain");
-    $query->fields("domain", ["id", "domain_id_drupal"]);
+    $query->fields("domain", [
+      "id",
+      "domain_id_drupal"
+    ]);
     $request = $this->getRequest();
     $form = [
       "#attributes" => [
@@ -70,27 +66,28 @@ class FilterForm extends FormBase {
       ],
       'contain' => [
         '#type' => 'textfield',
-        '#title' => $this->t('Champ Texte'),
+        '#title' => $this->t('Domain id drupal'),
         '#size' => 30,
         '#maxlength' => 128,
         "#default_value" => $request->query->get("contain") ?? ""
       ],
       'limit' => [
         '#type' => 'number',
-        '#title' => $this->t('Champ Numérique'),
+        '#title' => $this->t('Number per page'),
         '#min' => 1, // Définir selon les besoins
         "#default_value" => $request->query->get("limit") ?? 50
       ],
       'submit' => [
         '#type' => 'submit',
-        '#value' => $this->t('Filtrer'),
-      ],
+        '#value' => $this->t('Filtrer')
+      ]
     ];
-
+    
     return $form;
   }
-
+  
   /**
+   *
    * {@inheritdoc}
    */
   public function validateForm(array &$form, FormStateInterface $form_state) {
@@ -99,8 +96,9 @@ class FilterForm extends FormBase {
     }
     parent::validateForm($form, $form_state);
   }
-
+  
   /**
+   *
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state) {
@@ -111,4 +109,5 @@ class FilterForm extends FormBase {
     ];
     $form_state->setRedirect("<current>", array_merge($request->query->all(), $filter));
   }
+  
 }
