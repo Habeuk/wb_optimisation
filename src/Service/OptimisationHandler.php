@@ -11,19 +11,19 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
  * Service description.
  */
 class OptimisationHandler {
-
+  
   /**
    *
    * @var string
    */
   protected $field_domain;
-
+  
   /**
    *
    * @var string
    */
   protected static $query_tag = "unhandle_pass";
-
+  
   /**
    *
    * @var array
@@ -40,13 +40,13 @@ class OptimisationHandler {
    * @var \Drupal\Core\Entity\EntityTypeManagerInterface
    */
   protected $entityTypeManager;
-
+  
   /**
    *
    * @var EntityFieldManager $entityFieldManager
    */
   protected $entityFieldManager;
-
+  
   /**
    * Constructs an OptimisationHandler object.
    *
@@ -60,7 +60,7 @@ class OptimisationHandler {
     // $this->field_domain =
     // \Drupal\domain_source\DomainSourceElementManagerInterface::DOMAIN_SOURCE_FIELD;
   }
-
+  
   /**
    *
    * @return array
@@ -68,7 +68,7 @@ class OptimisationHandler {
   protected function getStorageEntities() {
     $entities = $this->entityTypeManager->getDefinitions();
     if (!$this->entity_to_delete) {
-
+      
       $entities = array_filter($entities, function (EntityTypeInterface $entity) {
         if ($entity->getBaseTable()) {
           $entity_id = $entity->id();
@@ -92,12 +92,12 @@ class OptimisationHandler {
     }
     return $this->entity_to_delete;
   }
-
+  
   /**
    *
    * @return array<string>
    */
-  protected function getMenu($domain_id, $count = false, $number = 10) {
+  protected function getMenu($domain_id, $count = false, $number = -1) {
     $entity_type_id = "menu";
     $query = $this->entityTypeManager->getStorage($entity_type_id)->getQuery();
     $query->addTag(self::$query_tag);
@@ -117,28 +117,32 @@ class OptimisationHandler {
       // dd($domain_ovh_entity->getsubDomain());
     }
     $query->condition($orGroup);
-    $ids = $count ? $query->count()->execute() : $query->range(0, $number)->execute();
+    if ($count)
+      $ids = $query->count()->execute();
+    else
+      $ids = $number === -1 ? $query->execute() : $query->range(0, $number)->execute();
     return $ids;
   }
-
+  
   /**
    *
    * @return array<string>|int
    */
-  protected function getBlocks($domain_id, bool $count = false, $number = 10) {
+  protected function getBlocks($domain_id, bool $count = false, $number = -1) {
     $entity_type_id = "block";
     $query = $this->entityTypeManager->getStorage($entity_type_id)->getQuery();
     $query->addTag(self::$query_tag);
     $orGroup = $query->orConditionGroup();
-    $orGroup->condition('id', $domain_id, 'CONTAINS');;
+    $orGroup->condition('id', $domain_id, 'CONTAINS');
     $orGroup->condition('theme', $domain_id);
-
     $query->condition($orGroup);
-
-    $ids = $count ? $query->count()->execute() : $query->range(0, $number)->execute();
+    if ($count)
+      $ids = $query->count()->execute();
+    else
+      $ids = $number === -1 ? $query->execute() : $query->range(0, $number)->execute();
     return $ids;
   }
-
+  
   /**
    *
    * @param array<int> $ovh_ids
@@ -173,11 +177,11 @@ class OptimisationHandler {
     }
     batch_set($batch->toArray());
   }
-
+  
   public static function _mon_module_ajouter_hello_batch_finished($success, $results, $operations) {
     \Drupal::messenger()->addStatus("opération terminée");
   }
-
+  
   public static function _wb_optimisation_entity_delete($domain_id, $entity_id, $number, $total, &$context) {
     if (!isset($context["result"][$entity_id]))
       $context["result"][$entity_id] = $number <= $total ? $number : $total;
@@ -185,7 +189,7 @@ class OptimisationHandler {
       $context["result"][$entity_id] += $number;
     }
     $progress = $context["result"][$entity_id] > $total ? $total : $context["result"][$entity_id];
-
+    
     $context["message"] = t('@domain : Suppression des @entity_type_id en cours', [
       "@domain" => $domain_id,
       "@entity_type_id" => $entity_id
@@ -197,7 +201,7 @@ class OptimisationHandler {
     $optimisation_handler = \Drupal::service("wb_optimisation.handler");
     $optimisation_handler->deleteMultipleByDomain($entity_id, $number, $domain_id);
   }
-
+  
   public function CountDomainSubEntities($domain_id) {
     $entities_type = $this->getStorageEntities();
     $result = [];
@@ -225,30 +229,39 @@ class OptimisationHandler {
     }
     return $result;
   }
-
-  public function deleteMultipleByDomain($entity_id, $number, $domain_id) {
+  
+  /**
+   * Charge les entites en function du domaine et de l'id entity.
+   */
+  public function loadEntities($entity_id, $number, $domain_id) {
     $entityManager = $this->entityTypeManager->getStorage($entity_id);
     $query = $entityManager->getQuery()->accessCheck(False);
     $query->addTag(self::$query_tag);
-    $entitiesToDelete = [];
+    $entities = [];
     switch ($entity_id) {
       case 'menu':
-        $entitiesToDelete = $this->getMenu($domain_id, false, $number);
+        $entities = $this->getMenu($domain_id, false, $number);
         break;
       case "block":
-        $entitiesToDelete = $this->getBlocks($domain_id, false, $number);
+        $entities = $this->getBlocks($domain_id, false, $number);
         break;
       case "domain_ovh_entity":
         $query->condition('domain_id_drupal', $domain_id);
-        $entitiesToDelete = $query->execute();
+        $entities = $query->execute();
         break;
       case "domain":
         $query->condition('id', $domain_id, '=');
-        $entitiesToDelete = $query->range(0, $number)->execute();
+        if ($number === -1)
+          $entities = $query->execute();
+        else
+          $entities = $query->range(0, $number)->execute();
         break;
       case "config_theme_entity":
         $query->condition('hostname', $domain_id);
-        $entitiesToDelete = $query->range(0, $number)->execute();
+        if ($number === -1)
+          $entities = $query->execute();
+        else
+          $entities = $query->range(0, $number)->execute();
         break;
       default:
         $field_domain = isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)["domain_id"]) ? "domain_id" : $this->field_domain;
@@ -257,14 +270,29 @@ class OptimisationHandler {
         if ($subEntities[$entity_id][$this->field_public]) {
           $query->condition($this->field_public, false);
         }
-        $entitiesToDelete = $query->range(0, $number)->execute();
+        if ($number === -1)
+          $entities = $query->execute();
+        else
+          $entities = $query->range(0, $number)->execute();
         break;
     }
-
+    return $entities;
+  }
+  
+  /**
+   *
+   * @param string $entity_id
+   * @param string $number
+   * @param string $domain_id
+   */
+  public function deleteMultipleByDomain($entity_id, $number, $domain_id) {
+    $entityManager = $this->entityTypeManager->getStorage($entity_id);
+    $entitiesToDelete = $this->loadEntities($entity_id, $number, $domain_id);
     $entityManager->delete($entityManager->loadMultiple(array_keys($entitiesToDelete)));
   }
-
+  
   static public function getQueryTag() {
     return self::$query_tag;
   }
+  
 }
