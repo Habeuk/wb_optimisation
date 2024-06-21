@@ -1,4 +1,7 @@
 services:
+  logger.channel.wb_optimisation:
+    parent: logger.channel_base
+    arguments: ['wb_optimisation']
   wb_optimisation.handler:
     class: Drupal\wb_optimisation\Service\OptimisationHandler
-    arguments: ["@entity_type.manager",, "@entity_field.manager"]
+    arguments: ["@entity_type.manager", "@entity_field.manager","@logger.channel.wb_optimisation"]

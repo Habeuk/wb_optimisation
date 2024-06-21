@@ -75,11 +75,24 @@ class FilterForm extends FormBase {
         '#type' => 'number',
         '#title' => $this->t('Number per page'),
         '#min' => 1, // Définir selon les besoins
-        "#default_value" => $request->query->get("limit") ?? 50
+        "#default_value" => $request->query->get("limit") ?? 10
+      ],
+      'type_site' => [
+        '#type' => 'select',
+        '#title' => $this->t('Type de site'),
+        '#options' => [
+          'all' => "Tous",
+          'null' => "Vide",
+          'test' => 'Test (sont supprimé apres une durée ou supprimable) ', //
+          'client' => "client",
+          'demo' => 'Demo',
+          'privee' => 'privee'
+        ],
+        "#default_value" => $form_state->getValue("type_site") ?? "all"
       ],
       'submit' => [
         '#type' => 'submit',
-        '#value' => $this->t('Filtrer')
+        '#value' => $this->t(' Filtrer ')
       ]
     ];
     
@@ -87,6 +100,7 @@ class FilterForm extends FormBase {
   }
   
   /**
+   * --
    *
    * {@inheritdoc}
    */
@@ -105,7 +119,8 @@ class FilterForm extends FormBase {
     $request = $this->getRequest();
     $filter = [
       "contain" => $form_state->getValue("contain"),
-      "limit" => $form_state->getValue("limit")
+      "limit" => $form_state->getValue("limit"),
+      "type_site" => $form_state->getValue("type_site")
     ];
     $form_state->setRedirect("<current>", array_merge($request->query->all(), $filter));
   }

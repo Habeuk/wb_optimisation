@@ -6,6 +6,9 @@ use Drupal\Core\Batch\BatchBuilder;
 use Drupal\Core\Entity\EntityFieldManager;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Logger\LoggerChannel;
 
 /**
  * Service description.
@@ -48,17 +51,34 @@ class OptimisationHandler {
   protected $entityFieldManager;
   
   /**
+   * Permet de determiner si le cache est DEJA encours ou pas.
+   *
+   * @var boolean
+   */
+  protected $DeleteIsRunning = true;
+  
+  /**
+   * --
+   */
+  protected $DomainsToDelete = null;
+  
+  /**
+   *
+   * @var \Drupal\Core\Logger\LoggerChannel
+   */
+  protected $LoggerChannel;
+  
+  /**
    * Constructs an OptimisationHandler object.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
    *        The entity type manager.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, EntityFieldManager $entity_field_manager) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, EntityFieldManager $entity_field_manager, LoggerChannel $LoggerChannel) {
     $this->entityTypeManager = $entity_type_manager;
     $this->entityFieldManager = $entity_field_manager;
     $this->field_domain = \Drupal\domain_access\DomainAccessManagerInterface::DOMAIN_ACCESS_FIELD;
-    // $this->field_domain =
-    // \Drupal\domain_source\DomainSourceElementManagerInterface::DOMAIN_SOURCE_FIELD;
+    $this->LoggerChannel = $LoggerChannel;
   }
   
   /**
@@ -148,10 +168,11 @@ class OptimisationHandler {
    * @param array<int> $ovh_ids
    */
   public function deleteDomainBatch(array $ovh_ids) {
-    $batch = (new BatchBuilder())->setTitle('Suppression des entités liées au domaine..')->setFinishCallback([
+    $batch = (new BatchBuilder())->setTitle(' Suppression des entités liées au domaine... ')->setFinishCallback([
       self::class,
       '_mon_module_ajouter_hello_batch_finished'
     ]);
+    $DomainsToDelte = [];
     foreach ($ovh_ids as $ovh_id) {
       /**
        *
@@ -159,7 +180,9 @@ class OptimisationHandler {
        */
       $ovh_entity = $this->entityTypeManager->getStorage("domain_ovh_entity")->load($ovh_id);
       $domain_id = $ovh_entity->get("domain_id_drupal")->getValue()[0]["target_id"];
+      $DomainsToDelte[$domain_id] = $ovh_id;
       $subEntities = $this->CountDomainSubEntities($domain_id);
+      
       foreach ($subEntities as $subEntity_id => $count) {
         $limit = $subEntity_id == "block" ? 1 : 10;
         for ($i = 0; $i < $count / $limit; $i++) {
@@ -175,9 +198,120 @@ class OptimisationHandler {
         }
       }
     }
-    batch_set($batch->toArray());
+    $this->SetCacheDomainToDelete($DomainsToDelte);
+    if ($this->DeleteIsRunning) {
+      \Drupal::messenger()->addWarning(" Il ya déjà une suppression encours. Svp, veillez patiente 30 à 1h et re-tester ");
+      return false;
+    }
+    // L'idee est de pouvoir suivre.
+    \Stephane888\Debug\debugLog::symfonyDebug([
+      'bash_generer' => $batch->toArray(),
+      'ovh_ids' => $ovh_ids,
+      'subEntities' => $subEntities
+    ], 'deleteDomainBatch', true);
+    //
+    // batch_set($batch->toArray());
   }
   
+  /**
+   * Afin de verifier de maniere efficace que les contenus supprimer ont le
+   * droits d'etre supprimer.
+   * On les mettres en cache, ainsi avant la suppresion de chaque domaine, on
+   * pourra verifier.
+   *
+   * @param array $subEntities
+   * @param array $subEntities
+   * @return array // les domaines à supprimer.
+   */
+  protected function SetCacheDomainToDelete(array $subEntities) {
+    $domains = $this->getCacheDomains();
+    if ($domains) {
+      // Un cache est deja encours.
+      $this->DeleteIsRunning = true;
+      return $domains->data;
+    }
+    else {
+      // Aucun cache encours.
+      $this->DeleteIsRunning = false;
+      // On met en cache pendant 180 minutes.
+      $this->setCache('domains', $subEntities, time() + 180 * 60);
+      return $subEntities;
+    }
+  }
+  
+  /**
+   * Le but est de verifier que l'entité à supprimer doit effectivement
+   * etre supprimer.
+   */
+  public function ValidationEntitiToDelete(EntityInterface $entity) {
+    $DomainsToDelete = $this->getCacheDomains();
+    if ($entity instanceof ContentEntityInterface) {
+      if (!$entity->hasField($this->field_domain)) {
+        $message = " Ne peut etre supprimer, car ne dispose pas de champs :'" . $this->field_domain;
+        $this->runErrorEntity($entity, $message);
+      }
+      $domains = $entity->get($this->field_domain)->getValue();
+      if (count($domains) > 1) {
+        $message = "Ne peut etre supprimer, car contient plusieurs domaine";
+        $this->runErrorEntity($entity, $message, $domains);
+      }
+      $domain = $entity->get($this->field_domain)->target_id;
+      $domain = $entity->get($this->field_domain)->target_id;
+      if (!isset($DomainsToDelete[$domain])) {
+        $message = "Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion";
+        $this->runErrorEntity($entity, $message, $domains);
+      }
+      if (!isset($DomainsToDelete[$domain])) {
+        $message = "Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion";
+        $this->runErrorEntity($entity, $message, $domains);
+      }
+    }
+  }
+  
+  /**
+   *
+   * @param EntityInterface $entity
+   * @param string $message
+   * @param array $errors
+   */
+  protected function runErrorEntity(EntityInterface $entity, string $message, $errors = []) {
+    $info = "(" . $entity->label() . "::" . $entity->id() . ")";
+    $message = $message . ".  ENTITY info : " . $info;
+    $this->LoggerChannel->error($message);
+    \Stephane888\Debug\debugLog::symfonyDebug([
+      'entity_array' => $entity->toArray(),
+      'errors' => $errors
+    ], $entity->getEntityTypeId() . '___' . $entity->id() . '___', true);
+    Throw new \ErrorException($message);
+  }
+  
+  protected function getCacheDomains() {
+    if (!$this->DomainsToDelete) {
+      /**
+       *
+       * @var \Drupal\Core\Cache\ApcuBackend $cache
+       */
+      $cache = \Drupal::service("cache.backend.database")->get('wb_optimisation_delete_cache');
+      $this->DomainsToDelete = $cache->get('domains');
+    }
+    return $this->DomainsToDelete;
+  }
+  
+  protected function setCache($key, $value, $time) {
+    /**
+     *
+     * @var \Drupal\Core\Cache\ApcuBackend $cache
+     */
+    $cache = \Drupal::service("cache.backend.database")->get('wb_optimisation_delete_cache');
+    $cache->set($key, $value, $time);
+  }
+  
+  /**
+   *
+   * @param string $success
+   * @param array $results
+   * @param array $operations
+   */
   public static function _mon_module_ajouter_hello_batch_finished($success, $results, $operations) {
     \Drupal::messenger()->addStatus("opération terminée");
   }
