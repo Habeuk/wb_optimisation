@@ -10,6 +10,7 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Logger\LoggerChannel;
 use Drupal\Core\Config\Entity\ConfigEntityBase;
+use Drupal\Core\Entity\Query\Sql\Query;
 
 /**
  * Service description.
@@ -177,6 +178,7 @@ class OptimisationHandler {
       'domain',
       'config_theme_entity'
     ];
+    $subEntitiesAll = [];
     foreach ($ovh_ids as $ovh_id) {
       /**
        *
@@ -186,23 +188,25 @@ class OptimisationHandler {
       $domain_id = $ovh_entity->get("domain_id_drupal")->getValue()[0]["target_id"];
       $DomainsToDelte[$domain_id] = $ovh_id;
       $subEntities = $this->CountDomainSubEntities($domain_id);
-      
-      foreach ($subEntities as $subEntity_id => $count) {
-        $limit = $subEntity_id == "block" ? 1 : 10;
-        for ($i = 0; $i < $count / $limit; $i++) {
-          // On ignore certaines entites car elles serront supprimer
-          // automatiquement à la suite d'autres.
-          if (in_array($subEntity_id, $ignoreDeleteEntities))
-            continue;
-          $batch->addOperation([
-            self::class,
-            '_wb_optimisation_entity_delete'
-          ], [
-            $domain_id,
-            $subEntity_id,
-            $limit,
-            $count
-          ]);
+      if ($subEntities) {
+        $subEntitiesAll[] = $subEntities;
+        foreach ($subEntities as $subEntity_id => $count) {
+          $limit = $subEntity_id == "block" ? 1 : 10;
+          for ($i = 0; $i < $count / $limit; $i++) {
+            // On ignore certaines entites car elles serront supprimer
+            // automatiquement à la suite d'autres.
+            if (in_array($subEntity_id, $ignoreDeleteEntities))
+              continue;
+            $batch->addOperation([
+              self::class,
+              '_wb_optimisation_entity_delete'
+            ], [
+              $domain_id,
+              $subEntity_id,
+              $limit,
+              $count
+            ]);
+          }
         }
       }
     }
@@ -215,10 +219,11 @@ class OptimisationHandler {
     \Stephane888\Debug\debugLog::symfonyDebug([
       'bash_generer' => $batch->toArray(),
       'ovh_ids' => $ovh_ids,
-      'subEntities' => $subEntities
+      'subEntities' => $subEntitiesAll
     ], 'deleteDomainBatch', true);
     //
-    batch_set($batch->toArray());
+    if (!empty($subEntitiesAll))
+      batch_set($batch->toArray());
   }
   
   /**
@@ -269,26 +274,20 @@ class OptimisationHandler {
       switch ($entityTypeId) {
         case 'menu_link_content':
         case 'path_alias':
+        case 'donnee_internet_entity':
           return true;
-        case 'domain_ovh_entity__':
+        case 'domain_ovh_entity':
           $domain = $entity->getDomainIdDrupal();
           if (!isset($DomainsToDelete[$domain])) {
             $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
-            $this->runErrorEntity($entity, $message);
-          }
-          return true;
-        case 'domain':
-          $domain = $entity->id();
-          if (!isset($DomainsToDelete[$domain])) {
-            $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
-            $this->runErrorEntity($entity, $message);
+            $this->runErrorEntity($entity, $message, $DomainsToDelete);
           }
           return true;
         case 'config_theme_entity':
           $domain = $entity->getHostname();
           if (!isset($DomainsToDelete[$domain])) {
             $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
-            $this->runErrorEntity($entity, $message);
+            $this->runErrorEntity($entity, $message, $DomainsToDelete);
           }
           return true;
         default:
@@ -305,10 +304,9 @@ class OptimisationHandler {
           $this->checkIfDomainIsProtected($domain, $entity);
           if (!isset($DomainsToDelete[$domain])) {
             $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
-            $this->runErrorEntity($entity, $message, $domains);
+            $this->runErrorEntity($entity, $message, $DomainsToDelete);
           }
           return true;
-          break;
       }
     }
     elseif ($entity instanceof ConfigEntityBase) {
@@ -349,8 +347,16 @@ class OptimisationHandler {
             }
           }
           return true;
+        case 'domain':
+          $domain = $entity->id();
+          if (!isset($DomainsToDelete[$domain])) {
+            $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
+            $this->runErrorEntity($entity, $message, $DomainsToDelete);
+          }
+          return true;
         case 'base_field_override':
         case 'language_content_settings':
+        case 'action':
           // on autorise ces derniers, car il proviennent du main menu qui a été
           // verifier.
           return true;
@@ -505,31 +511,31 @@ class OptimisationHandler {
     $entityManager = $this->entityTypeManager->getStorage($entity_id);
     $query = $entityManager->getQuery()->accessCheck(False);
     $query->addTag(self::$query_tag);
-    $entities = [];
+    $ids = [];
     switch ($entity_id) {
       case 'menu':
-        $entities = $this->getMenu($domain_id, false, $number);
+        $ids = $this->getMenu($domain_id, false, $number);
         break;
       case "block":
-        $entities = $this->getBlocks($domain_id, false, $number);
+        $ids = $this->getBlocks($domain_id, false, $number);
         break;
       case "domain_ovh_entity":
         $query->condition('domain_id_drupal', $domain_id);
-        $entities = $query->execute();
+        $ids = $query->execute();
         break;
       case "domain":
         $query->condition('id', $domain_id, '=');
         if ($number === -1)
-          $entities = $query->execute();
+          $ids = $query->execute();
         else
-          $entities = $query->range(0, $number)->execute();
+          $ids = $query->range(0, $number)->execute();
         break;
       case "config_theme_entity":
         $query->condition('hostname', $domain_id);
         if ($number === -1)
-          $entities = $query->execute();
+          $ids = $query->execute();
         else
-          $entities = $query->range(0, $number)->execute();
+          $ids = $query->range(0, $number)->execute();
         break;
       default:
         $field_domain = isset($this->entityFieldManager->getActiveFieldStorageDefinitions($entity_id)["domain_id"]) ? "domain_id" : $this->field_domain;
@@ -539,12 +545,27 @@ class OptimisationHandler {
           $query->condition($this->field_public, false);
         }
         if ($number === -1)
-          $entities = $query->execute();
+          $ids = $query->execute();
         else
-          $entities = $query->range(0, $number)->execute();
+          $ids = $query->range(0, $number)->execute();
+        //
+        // $this->runErrorFromLoadingEntities($query, $entities);
+        
         break;
     }
-    return $entities;
+    return $ids;
+  }
+  
+  /**
+   * Permet d'analyser les données et requtes lors du chargement.
+   * Utile uniquement en mode debug.
+   */
+  protected function runErrorFromLoadingEntities(Query $sql, array $entities) {
+    \Stephane888\Debug\debugLog::symfonyDebug([
+      'entities_ids' => $entities,
+      'sql' => $sql,
+      'sql_string' => $sql->__toString()
+    ], 'runErrorFromLoadingEntities___', true);
   }
   
   /**
@@ -554,9 +575,18 @@ class OptimisationHandler {
    * @param string $domain_id
    */
   public function deleteMultipleByDomain($entity_id, $number, $domain_id) {
+    /**
+     *
+     * @var \Drupal\Core\Entity\EntityStorageBase $entityManager
+     */
     $entityManager = $this->entityTypeManager->getStorage($entity_id);
     $entitiesToDelete = $this->loadEntities($entity_id, $number, $domain_id);
-    $entityManager->delete($entityManager->loadMultiple(array_keys($entitiesToDelete)));
+    // $entities = $entityManager->loadMultiple(array_keys($entitiesToDelete));
+    $entities = $entityManager->loadMultiple($entitiesToDelete);
+    foreach ($entities as $entity) {
+      $this->ValidationEntitiToDelete($entity);
+    }
+    $entityManager->delete($entities);
   }
   
   static public function getQueryTag() {

@@ -103,7 +103,11 @@ class FormDeleteBatch extends FormBase {
           "#open" => false
         ];
         $subEntitiesCount = $this->optimisationHandler->CountDomainSubEntities($value->domain_id_drupal);
+        $total_count = 0;
         foreach ($subEntitiesCount as $sub_entity_id => $count) {
+          if (!$count)
+            continue;
+          $total_count += $count;
           $options[$entity_id][$sub_entity_id] = [
             '#markup' => Markup::create("<div>$sub_entity_id: $count</div>")
           ];
@@ -112,37 +116,30 @@ class FormDeleteBatch extends FormBase {
             "#title" => $sub_entity_id,
             "#open" => false
           ];
-          $entities = $this->optimisationHandler->loadEntities($sub_entity_id, -1, $value->domain_id_drupal);
+          $ids = $this->optimisationHandler->loadEntities($sub_entity_id, -1, $value->domain_id_drupal);
+          $entities = $this->entityTypeManager->getStorage($sub_entity_id)->loadMultiple($ids);
           $links = [];
-          foreach ($entities as $id) {
-            /**
-             *
-             * @var \Drupal\node\Entity\Node $content
-             */
-            $content = $this->entityTypeManager->getStorage($sub_entity_id)->load($id);
-            if ($content) {
-              $link = [
-                'title' => $content->label() . ' (' . $id . ') ',
-                'url' => null
-              ];
-              $link_templates = $content->getEntityType()->getLinkTemplates();
-              if (isset($link_templates['canonical'])) {
-                $link['url'] = $content->toUrl();
-              }
-              if ($content->getEntityType()->getBaseTable() && $content->hasField($this->field_domain)) {
-                $link['title'] = $content->get($this->field_domain)->target_id . ' | ' . $link['title'];
-              }
-              $links[] = $link;
+          foreach ($entities as $content) {
+            $id = $content->id();
+            $link = [
+              'title' => $content->label() . ' (' . $id . ') ',
+              'url' => null
+            ];
+            $link_templates = $content->getEntityType()->getLinkTemplates();
+            if (isset($link_templates['canonical'])) {
+              $link['url'] = $content->toUrl();
             }
-            else {
-              $this->messenger()->addWarning('Contenu non accessible : ' . $sub_entity_id . " :: id " . $id);
+            if ($content->getEntityType()->getBaseTable() && $content->hasField($this->field_domain)) {
+              $link['title'] = $content->get($this->field_domain)->target_id . ' | ' . $link['title'];
             }
+            $links[] = $link;
           }
           $options[$entity_id][$sub_entity_id]['contents']['links'] = [
             '#theme' => 'links',
             '#links' => $links
           ];
         }
+        $options[$entity_id]["#title"] = $options[$entity_id]["#title"] . " ($total_count)";
       }
       $form["ovh_entities"] = [
         "#type" => "checkboxes",
@@ -185,13 +182,17 @@ class FormDeleteBatch extends FormBase {
    */
   public function submitForm(array &$form, FormStateInterface $form_state) {
     $entities = [];
-    foreach ($form_state->getValue("ovh_entities") as $key => $ovh_entity) {
+    foreach ($form_state->getValue("ovh_entities") as $ovh_entity) {
       if ($ovh_entity)
         $entities[$ovh_entity] = (int) $ovh_entity;
       else
         break;
     }
-    $this->optimisationHandler->deleteDomainBatch($entities);
+    if ($entities)
+      $this->optimisationHandler->deleteDomainBatch($entities);
+    else {
+      $this->messenger()->addWarning("Vous devez selectionner au moins 1 domaine ");
+    }
   }
   
 }
