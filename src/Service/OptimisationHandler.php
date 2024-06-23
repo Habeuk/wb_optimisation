@@ -9,6 +9,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Logger\LoggerChannel;
+use Drupal\Core\Config\Entity\ConfigEntityBase;
 
 /**
  * Service description.
@@ -129,12 +130,11 @@ class OptimisationHandler {
     if (!empty($domain_ovh_entities)) {
       /**
        *
-       * @var \Drupal\ovh_api_rest\Entity\DomainOvhEntity
+       * @var \Drupal\ovh_api_rest\Entity\DomainOvhEntity $domain_ovh_entity
        */
       $domain_ovh_entity = reset($domain_ovh_entities);
       $orGroup->condition('id', $domain_ovh_entity->getsubDomain() . '_main');
       $orGroup->condition('id', $domain_ovh_entity->getsubDomain() . '-main');
-      // dd($domain_ovh_entity->getsubDomain());
     }
     $query->condition($orGroup);
     if ($count)
@@ -170,9 +170,13 @@ class OptimisationHandler {
   public function deleteDomainBatch(array $ovh_ids) {
     $batch = (new BatchBuilder())->setTitle(' Suppression des entités liées au domaine... ')->setFinishCallback([
       self::class,
-      '_mon_module_ajouter_hello_batch_finished'
+      '_deletion_batch_finished'
     ]);
     $DomainsToDelte = [];
+    $ignoreDeleteEntities = [
+      'domain',
+      'config_theme_entity'
+    ];
     foreach ($ovh_ids as $ovh_id) {
       /**
        *
@@ -186,6 +190,10 @@ class OptimisationHandler {
       foreach ($subEntities as $subEntity_id => $count) {
         $limit = $subEntity_id == "block" ? 1 : 10;
         for ($i = 0; $i < $count / $limit; $i++) {
+          // On ignore certaines entites car elles serront supprimer
+          // automatiquement à la suite d'autres.
+          if (in_array($subEntity_id, $ignoreDeleteEntities))
+            continue;
           $batch->addOperation([
             self::class,
             '_wb_optimisation_entity_delete'
@@ -210,7 +218,7 @@ class OptimisationHandler {
       'subEntities' => $subEntities
     ], 'deleteDomainBatch', true);
     //
-    // batch_set($batch->toArray());
+    batch_set($batch->toArray());
   }
   
   /**
@@ -225,10 +233,9 @@ class OptimisationHandler {
    */
   protected function SetCacheDomainToDelete(array $subEntities) {
     $domains = $this->getCacheDomains();
-    if ($domains) {
+    if (!empty($domains)) {
       // Un cache est deja encours.
       $this->DeleteIsRunning = true;
-      return $domains->data;
     }
     else {
       // Aucun cache encours.
@@ -240,31 +247,144 @@ class OptimisationHandler {
   }
   
   /**
+   * --
+   */
+  public function clearCahes() {
+    /**
+     *
+     * @var \Drupal\Core\Cache\ApcuBackend $cache
+     */
+    $cache = \Drupal::service("cache.backend.database")->get('wb_optimisation_delete_cache');
+    $cache->deleteAll();
+  }
+  
+  /**
    * Le but est de verifier que l'entité à supprimer doit effectivement
    * etre supprimer.
    */
   public function ValidationEntitiToDelete(EntityInterface $entity) {
     $DomainsToDelete = $this->getCacheDomains();
     if ($entity instanceof ContentEntityInterface) {
-      if (!$entity->hasField($this->field_domain)) {
-        $message = " Ne peut etre supprimer, car ne dispose pas de champs :'" . $this->field_domain;
+      $entityTypeId = $entity->getEntityTypeId();
+      switch ($entityTypeId) {
+        case 'menu_link_content':
+        case 'path_alias':
+          return true;
+        case 'domain_ovh_entity__':
+          $domain = $entity->getDomainIdDrupal();
+          if (!isset($DomainsToDelete[$domain])) {
+            $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
+            $this->runErrorEntity($entity, $message);
+          }
+          return true;
+        case 'domain':
+          $domain = $entity->id();
+          if (!isset($DomainsToDelete[$domain])) {
+            $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
+            $this->runErrorEntity($entity, $message);
+          }
+          return true;
+        case 'config_theme_entity':
+          $domain = $entity->getHostname();
+          if (!isset($DomainsToDelete[$domain])) {
+            $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
+            $this->runErrorEntity($entity, $message);
+          }
+          return true;
+        default:
+          if (!$entity->hasField($this->field_domain)) {
+            $message = " Ne peut etre supprimer, car ne dispose pas de champs :'" . $this->field_domain;
+            $this->runErrorEntity($entity, $message, $entity);
+          }
+          $domains = $entity->get($this->field_domain)->getValue();
+          if (count($domains) > 1) {
+            $message = "Ne peut etre supprimer, car contient plusieurs domaine";
+            $this->runErrorEntity($entity, $message, $domains);
+          }
+          $domain = $entity->get($this->field_domain)->target_id;
+          $this->checkIfDomainIsProtected($domain, $entity);
+          if (!isset($DomainsToDelete[$domain])) {
+            $message = " Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion ";
+            $this->runErrorEntity($entity, $message, $domains);
+          }
+          return true;
+          break;
+      }
+    }
+    elseif ($entity instanceof ConfigEntityBase) {
+      $entityTypeId = $entity->getEntityTypeId();
+      switch ($entityTypeId) {
+        case 'block':
+          $domain = $entity->get('theme');
+          $this->checkIfDomainIsProtected($domain, $entity);
+          return true;
+        case 'menu':
+          $idMenu = $entity->get('id');
+          if (str_contains($idMenu, "_main")) {
+            $sub_domain = str_replace("_main", "", $idMenu);
+          }
+          elseif (str_contains($idMenu, "-main")) {
+            $sub_domain = str_replace("-main", "", $idMenu);
+          }
+          $domain_ovh_entities = $this->entityTypeManager->getStorage('domain_ovh_entity')->loadByProperties([
+            'sub_domain' => $sub_domain
+          ]);
+          if (count($domain_ovh_entities) > 1) {
+            $message = " Ne peut etre supprimer, car il ya des risques de perte de donnée,veillez verifier cela et le faire manuellement ";
+            $this->runErrorEntity($entity, $message, $domain_ovh_entities);
+          }
+          if (!empty($domain_ovh_entities)) {
+            /**
+             *
+             * @var \Drupal\ovh_api_rest\Entity\DomainOvhEntity $domain_ovh_entity
+             */
+            $domain_ovh_entity = reset($domain_ovh_entities);
+            $new_domain = $domain_ovh_entity->getDomainIdDrupal();
+            if (!empty($new_domain)) {
+              $this->checkIfDomainIsProtected($new_domain, $entity);
+            }
+            else {
+              $message = " Ne peut etre supprimer, car impossible de remonter au domaine parent";
+              $this->runErrorEntity($entity, $message, $domain_ovh_entities);
+            }
+          }
+          return true;
+        case 'base_field_override':
+        case 'language_content_settings':
+          // on autorise ces derniers, car il proviennent du main menu qui a été
+          // verifier.
+          return true;
+      }
+    }
+    //
+    $message = " Ne peut etre supprimer, car n'est pas pris en compte, veillez contacter le developper ... ";
+    $this->runErrorEntity($entity, $message, $entity);
+  }
+  
+  /**
+   *
+   * @param string $domain
+   * @param EntityInterface $entity
+   * @return bool
+   */
+  protected function checkIfDomainIsProtected($domain, EntityInterface $entity) {
+    $domains = $this->entityTypeManager->getStorage('domain_ovh_entity')->loadByProperties([
+      'domain_id_drupal' => $domain
+    ]);
+    if (!empty($domains)) {
+      /**
+       *
+       * @var \Drupal\ovh_api_rest\Entity\DomainOvhEntity $domainObject
+       */
+      $domainObject = reset($domains);
+      if (!$domainObject->isDeletable()) {
+        $message = " Ne peut etre supprimer, car l'entité de reference 'domain_ovh_entity' indique : " . $domainObject->getTypeSite();
         $this->runErrorEntity($entity, $message);
       }
-      $domains = $entity->get($this->field_domain)->getValue();
-      if (count($domains) > 1) {
-        $message = "Ne peut etre supprimer, car contient plusieurs domaine";
-        $this->runErrorEntity($entity, $message, $domains);
-      }
-      $domain = $entity->get($this->field_domain)->target_id;
-      $domain = $entity->get($this->field_domain)->target_id;
-      if (!isset($DomainsToDelete[$domain])) {
-        $message = "Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion";
-        $this->runErrorEntity($entity, $message, $domains);
-      }
-      if (!isset($DomainsToDelete[$domain])) {
-        $message = "Ne peut etre supprimer, car n'appartient à aucun des domaines definit pour la suppresion";
-        $this->runErrorEntity($entity, $message, $domains);
-      }
+    }
+    else {
+      $message = " Ne peut etre supprimer, Car on ne parvient à determiner la reference au niveau de domain_ovh_entity";
+      $this->runErrorEntity($entity, $message);
     }
   }
   
@@ -277,11 +397,14 @@ class OptimisationHandler {
   protected function runErrorEntity(EntityInterface $entity, string $message, $errors = []) {
     $info = "(" . $entity->label() . "::" . $entity->id() . ")";
     $message = $message . ".  ENTITY info : " . $info;
+    // pas necessaie car les errors avec ErrorException sont deja attrapé par
+    // PHP.
     $this->LoggerChannel->error($message);
     \Stephane888\Debug\debugLog::symfonyDebug([
       'entity_array' => $entity->toArray(),
       'errors' => $errors
     ], $entity->getEntityTypeId() . '___' . $entity->id() . '___', true);
+    $this->clearCahes();
     Throw new \ErrorException($message);
   }
   
@@ -292,7 +415,12 @@ class OptimisationHandler {
        * @var \Drupal\Core\Cache\ApcuBackend $cache
        */
       $cache = \Drupal::service("cache.backend.database")->get('wb_optimisation_delete_cache');
-      $this->DomainsToDelete = $cache->get('domains');
+      $domains = $cache->get('domains');
+      if ($domains) {
+        $this->DomainsToDelete = $domains->data;
+      }
+      else
+        $this->DomainsToDelete = [];
     }
     return $this->DomainsToDelete;
   }
@@ -312,8 +440,14 @@ class OptimisationHandler {
    * @param array $results
    * @param array $operations
    */
-  public static function _mon_module_ajouter_hello_batch_finished($success, $results, $operations) {
+  public static function _deletion_batch_finished($success, $results, $operations) {
     \Drupal::messenger()->addStatus("opération terminée");
+    /**
+     *
+     * @var \Drupal\wb_optimisation\Service\OptimisationHandler $wb_optimisation
+     */
+    $wb_optimisation = \Drupal::service("wb_optimisation.handler");
+    $wb_optimisation->clearCahes();
   }
   
   public static function _wb_optimisation_entity_delete($domain_id, $entity_id, $number, $total, &$context) {
@@ -354,9 +488,9 @@ class OptimisationHandler {
       $result[$entity_type_id] = $query->count()->execute();
     }
     $uniqueEntities = [
-      "domain_ovh_entity",
       "domain",
-      "config_theme_entity"
+      "config_theme_entity",
+      "domain_ovh_entity"
     ];
     foreach ($uniqueEntities as $entity_id) {
       $result[$entity_id] = 1;

@@ -88,7 +88,7 @@ class FilterForm extends FormBase {
           'demo' => 'Demo',
           'privee' => 'privee'
         ],
-        "#default_value" => $form_state->getValue("type_site") ?? "all"
+        "#default_value" => $request->query->get("type_site") ?? "all"
       ],
       'submit' => [
         '#type' => 'submit',
