@@ -175,8 +175,7 @@ class OptimisationHandler {
     ]);
     $DomainsToDelte = [];
     $ignoreDeleteEntities = [
-      'domain',
-      'config_theme_entity'
+      'domain'
     ];
     $subEntitiesAll = [];
     foreach ($ovh_ids as $ovh_id) {
@@ -494,8 +493,8 @@ class OptimisationHandler {
       $result[$entity_type_id] = $query->count()->execute();
     }
     $uniqueEntities = [
-      "domain",
       "config_theme_entity",
+      "domain",
       "domain_ovh_entity"
     ];
     foreach ($uniqueEntities as $entity_id) {
