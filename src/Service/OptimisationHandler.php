@@ -215,11 +215,11 @@ class OptimisationHandler {
       return false;
     }
     // L'idee est de pouvoir suivre.
-    \Stephane888\Debug\debugLog::symfonyDebug([
-      'bash_generer' => $batch->toArray(),
-      'ovh_ids' => $ovh_ids,
-      'subEntities' => $subEntitiesAll
-    ], 'deleteDomainBatch', true);
+    // \Stephane888\Debug\debugLog::symfonyDebug([
+    // 'bash_generer' => $batch->toArray(),
+    // 'ovh_ids' => $ovh_ids,
+    // 'subEntities' => $subEntitiesAll
+    // ], 'deleteDomainBatch', true);
     //
     if (!empty($subEntitiesAll))
       batch_set($batch->toArray());
